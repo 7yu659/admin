@@ -4351,44 +4351,55 @@ document.addEventListener('DOMContentLoaded', async () => {
         return _aiApiKey;
     }
 
-    // ── Gemini API (2024 correct models) ──
+    // ── Gemini API (2024 correct models + auto retry) ──
     async function callGemini(prompt, apiKey, model) {
-        // সঠিক model list — Gemini API 2024
         const modelList = model
             ? [model]
-            : ['gemini-2.0-flash', 'gemini-2.0-flash-lite', 'gemini-1.5-flash', 'gemini-1.5-flash-8b', 'gemini-1.5-pro'];
+            : ['gemini-2.0-flash', 'gemini-1.5-flash', 'gemini-1.5-flash-8b', 'gemini-1.5-pro'];
+
+        // Rate limit হলে wait করে retry
+        async function tryModel(m, retryCount) {
+            const url = 'https://generativelanguage.googleapis.com/v1beta/models/' + m + ':generateContent?key=' + apiKey;
+            const res = await fetch(url, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    contents: [{ role: 'user', parts: [{ text: prompt }] }],
+                    generationConfig: { maxOutputTokens: 400, temperature: 0.7 }
+                })
+            });
+            const data = await res.json();
+            if (!data.error) {
+                const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
+                if (text) return text.trim();
+                return null;
+            }
+            const err = data.error;
+            // Model not found — skip
+            if (err.status === 'NOT_FOUND' || err.code === 404) return 'NOT_FOUND';
+            // Rate limit / quota — retry once after wait
+            if ((err.status === 'RESOURCE_EXHAUSTED' || err.code === 429) && retryCount < 1) {
+                const retryMatch = (err.message || '').match(/retry in ([\d.]+)s/i);
+                const waitMs = retryMatch ? Math.ceil(parseFloat(retryMatch[1])) * 1000 : 5000;
+                const waitSec = Math.ceil(waitMs / 1000);
+                // Loading message update করো
+                const btn = document.getElementById('aiBtnSuggest');
+                if (btn) btn.innerHTML = '<i class="fas fa-clock"></i> ' + waitSec + 's wait...';
+                await new Promise(r => setTimeout(r, waitMs));
+                return await tryModel(m, retryCount + 1);
+            }
+            throw new Error(err.message || 'Gemini Error');
+        }
 
         let lastErr = '';
         for (const m of modelList) {
             try {
-                // v1beta is the correct endpoint for Gemini
-                const url = 'https://generativelanguage.googleapis.com/v1beta/models/' + m + ':generateContent?key=' + apiKey;
-                const res = await fetch(url, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        contents: [{ role: 'user', parts: [{ text: prompt }] }],
-                        generationConfig: { maxOutputTokens: 500, temperature: 0.7 }
-                    })
-                });
-                const data = await res.json();
-                if (data.error) {
-                    lastErr = data.error.message || 'Gemini Error';
-                    // model not found হলে পরেরটা try করো
-                    if (data.error.status === 'NOT_FOUND' || data.error.code === 404) continue;
-                    throw new Error(lastErr);
-                }
-                const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
-                if (text) return text.trim();
-                lastErr = 'Empty response';
-            } catch(e) {
-                if (e.message && (e.message.includes('not found') || e.message.includes('NOT_FOUND') || e.message.includes('404'))) {
-                    lastErr = e.message; continue;
-                }
-                throw e;
-            }
+                const result = await tryModel(m, 0);
+                if (result === 'NOT_FOUND') continue;
+                if (result) return result;
+            } catch(e) { lastErr = e.message; }
         }
-        throw new Error('Gemini: ' + lastErr + '. AI Settings-এ সঠিক API Key দিন।');
+        throw new Error('Gemini Error: ' + lastErr);
     }
 
     // ── OpenAI API ──
