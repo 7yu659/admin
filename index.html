@@ -2657,6 +2657,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                             <option value="gemini">Google Gemini</option>
                             <option value="openai">OpenAI (ChatGPT)</option>
                             <option value="anthropic">Anthropic (Claude)</option>
+                            <option value="huggingface">HuggingFace (Free)</option>
                         </select>
                     </div>
 
@@ -2715,6 +2716,12 @@ document.addEventListener('DOMContentLoaded', async () => {
                 models: 'claude-3-haiku-20240307, claude-3-5-haiku-20241022, claude-3-sonnet-20240229',
                 defaultModel: 'claude-3-haiku-20240307',
                 placeholder: 'sk-ant-...'
+            },
+            huggingface: {
+                hint: '<a href="https://huggingface.co/settings/tokens" target="_blank" style="color:var(--primary-color);">huggingface.co/settings/tokens</a> — FREE Token (New token > Read access)',
+                models: 'mistralai/Mistral-7B-Instruct-v0.3, meta-llama/Meta-Llama-3-8B-Instruct, HuggingFaceH4/zephyr-7b-beta',
+                defaultModel: 'mistralai/Mistral-7B-Instruct-v0.3',
+                placeholder: 'hf_...'
             }
         };
 
@@ -4339,11 +4346,11 @@ document.addEventListener('DOMContentLoaded', async () => {
             const doc = await db.collection('_configs').doc('aiSettings').get();
             if (doc.exists) {
                 const d = doc.data();
-                _aiApiKey  = d.apiKey   || '';
+                _aiApiKey   = d.apiKey   || '';
                 _aiProvider = d.provider || 'gemini';
-                _aiModel   = d.model    || '';
+                _aiModel    = d.model    || '';
             }
-        } catch(e) {}
+        } catch(e) { console.warn('AI config load failed:', e); }
     }
 
     async function getAIApiKey() {
@@ -4468,6 +4475,70 @@ document.addEventListener('DOMContentLoaded', async () => {
         throw new Error('Anthropic: ' + lastErr);
     }
 
+    // ── HuggingFace Inference API ──
+    async function callHuggingFace(prompt, apiKey, model) {
+        const modelList = model
+            ? [model]
+            : [
+                'mistralai/Mistral-7B-Instruct-v0.3',
+                'HuggingFaceH4/zephyr-7b-beta',
+                'microsoft/DialoGPT-large',
+                'facebook/blenderbot-400M-distill'
+              ];
+
+        let lastErr = '';
+        for (const m of modelList) {
+            try {
+                const url = 'https://api-inference.huggingface.co/models/' + m + '/v1/chat/completions';
+                const res = await fetch(url, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': 'Bearer ' + apiKey
+                    },
+                    body: JSON.stringify({
+                        model: m,
+                        messages: [{ role: 'user', content: prompt }],
+                        max_tokens: 400,
+                        temperature: 0.7,
+                        stream: false
+                    })
+                });
+                const data = await res.json();
+
+                // OpenAI-compatible response
+                if (data.choices && data.choices[0] && data.choices[0].message) {
+                    return data.choices[0].message.content.trim();
+                }
+                // Legacy HF format
+                if (Array.isArray(data) && data[0] && data[0].generated_text) {
+                    const full = data[0].generated_text;
+                    // prompt বাদ দিয়ে শুধু generated part নাও
+                    const reply = full.includes(prompt) ? full.slice(full.lastIndexOf(prompt) + prompt.length).trim() : full.trim();
+                    if (reply) return reply;
+                }
+                if (data.error) {
+                    lastErr = data.error;
+                    // Model loading হচ্ছে — retry
+                    if (typeof data.error === 'string' && data.error.includes('loading')) {
+                        await new Promise(r => setTimeout(r, 8000));
+                        // একবার retry
+                        const res2 = await fetch(url, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + apiKey },
+                            body: JSON.stringify({ model: m, messages: [{ role: 'user', content: prompt }], max_tokens: 400, stream: false })
+                        });
+                        const data2 = await res2.json();
+                        if (data2.choices?.[0]?.message?.content) return data2.choices[0].message.content.trim();
+                    }
+                    continue;
+                }
+                lastErr = 'Empty response from ' + m;
+            } catch(e) { lastErr = e.message; }
+        }
+        throw new Error('HuggingFace Error: ' + lastErr + '\n\n💡 huggingface.co/settings/tokens থেকে নতুন token নিন।');
+    }
+
     // ── Universal AI caller ──
     async function callClaudeAI(systemPrompt, userMsg) {
         await loadAIConfig();
@@ -4477,9 +4548,10 @@ document.addEventListener('DOMContentLoaded', async () => {
         const fullPrompt = (systemPrompt ? systemPrompt + '\n\n' : '') + userMsg;
 
         switch (_aiProvider) {
-            case 'openai':    return await callOpenAI(fullPrompt, apiKey, _aiModel);
-            case 'anthropic': return await callAnthropic(fullPrompt, apiKey, _aiModel);
-            default:          return await callGemini(fullPrompt, apiKey, _aiModel);
+            case 'openai':       return await callOpenAI(fullPrompt, apiKey, _aiModel);
+            case 'anthropic':    return await callAnthropic(fullPrompt, apiKey, _aiModel);
+            case 'huggingface':  return await callHuggingFace(fullPrompt, apiKey, _aiModel);
+            default:             return await callGemini(fullPrompt, apiKey, _aiModel);
         }
     }
 
