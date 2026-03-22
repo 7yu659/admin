@@ -2699,20 +2699,20 @@ document.addEventListener('DOMContentLoaded', async () => {
 
         const providerInfo = {
             gemini: {
-                hint: 'aistudio.google.com/app/apikey থেকে API Key নিন।',
-                models: 'gemini-1.5-flash, gemini-1.5-pro, gemini-2.0-flash',
-                defaultModel: 'gemini-1.5-flash',
-                placeholder: 'AIza...'
+                hint: '<a href="https://aistudio.google.com/app/apikey" target="_blank" style="color:var(--primary-color);">aistudio.google.com/app/apikey</a> — FREE API Key',
+                models: 'gemini-2.0-flash (latest), gemini-1.5-flash, gemini-1.5-pro',
+                defaultModel: 'gemini-2.0-flash',
+                placeholder: 'AIzaSy...'
             },
             openai: {
-                hint: 'platform.openai.com/api-keys থেকে API Key নিন।',
+                hint: '<a href="https://platform.openai.com/api-keys" target="_blank" style="color:var(--primary-color);">platform.openai.com/api-keys</a>',
                 models: 'gpt-4o-mini, gpt-4o, gpt-3.5-turbo',
                 defaultModel: 'gpt-4o-mini',
                 placeholder: 'sk-...'
             },
             anthropic: {
-                hint: 'console.anthropic.com/settings/keys থেকে API Key নিন।',
-                models: 'claude-3-haiku-20240307, claude-3-5-haiku-20241022',
+                hint: '<a href="https://console.anthropic.com/settings/keys" target="_blank" style="color:var(--primary-color);">console.anthropic.com/settings/keys</a>',
+                models: 'claude-3-haiku-20240307, claude-3-5-haiku-20241022, claude-3-sonnet-20240229',
                 defaultModel: 'claude-3-haiku-20240307',
                 placeholder: 'sk-ant-...'
             }
@@ -2721,7 +2721,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         function updateProviderUI() {
             const p = document.getElementById('aiProviderSelect').value;
             const info = providerInfo[p];
-            document.getElementById('apiKeyHint').innerHTML = '<a href="#" style="color:var(--primary-color);">' + info.hint + '</a>';
+            document.getElementById('apiKeyHint').innerHTML = info.hint;
             document.getElementById('aiApiKeyInput').placeholder = info.placeholder;
             document.getElementById('modelHint').textContent = 'Available: ' + info.models;
             document.getElementById('aiModelInput').placeholder = 'Default: ' + info.defaultModel;
@@ -4351,35 +4351,44 @@ document.addEventListener('DOMContentLoaded', async () => {
         return _aiApiKey;
     }
 
-    // ── Gemini API ──
+    // ── Gemini API (2024 correct models) ──
     async function callGemini(prompt, apiKey, model) {
-        // v1 এবং v1beta দুটোই try করো, একাধিক model
-        const attempts = [
-            { ver: 'v1',     m: model || 'gemini-1.5-flash' },
-            { ver: 'v1beta', m: model || 'gemini-1.5-flash' },
-            { ver: 'v1',     m: 'gemini-pro' },
-            { ver: 'v1beta', m: 'gemini-pro' },
-            { ver: 'v1',     m: 'gemini-1.0-pro' },
-        ];
+        // সঠিক model list — Gemini API 2024
+        const modelList = model
+            ? [model]
+            : ['gemini-2.0-flash', 'gemini-2.0-flash-lite', 'gemini-1.5-flash', 'gemini-1.5-flash-8b', 'gemini-1.5-pro'];
+
         let lastErr = '';
-        for (const a of attempts) {
+        for (const m of modelList) {
             try {
-                const url = 'https://generativelanguage.googleapis.com/' + a.ver + '/models/' + a.m + ':generateContent?key=' + apiKey;
+                // v1beta is the correct endpoint for Gemini
+                const url = 'https://generativelanguage.googleapis.com/v1beta/models/' + m + ':generateContent?key=' + apiKey;
                 const res = await fetch(url, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
                         contents: [{ role: 'user', parts: [{ text: prompt }] }],
-                        generationConfig: { maxOutputTokens: 400, temperature: 0.7 }
+                        generationConfig: { maxOutputTokens: 500, temperature: 0.7 }
                     })
                 });
                 const data = await res.json();
-                if (data.error) { lastErr = data.error.message || 'Gemini Error'; continue; }
+                if (data.error) {
+                    lastErr = data.error.message || 'Gemini Error';
+                    // model not found হলে পরেরটা try করো
+                    if (data.error.status === 'NOT_FOUND' || data.error.code === 404) continue;
+                    throw new Error(lastErr);
+                }
                 const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
                 if (text) return text.trim();
-            } catch(e) { lastErr = e.message; }
+                lastErr = 'Empty response';
+            } catch(e) {
+                if (e.message && (e.message.includes('not found') || e.message.includes('NOT_FOUND') || e.message.includes('404'))) {
+                    lastErr = e.message; continue;
+                }
+                throw e;
+            }
         }
-        throw new Error('Gemini Error: ' + lastErr);
+        throw new Error('Gemini: ' + lastErr + '. AI Settings-এ সঠিক API Key দিন।');
     }
 
     // ── OpenAI API ──
@@ -4409,28 +4418,43 @@ document.addEventListener('DOMContentLoaded', async () => {
         throw new Error('OpenAI Error: ' + lastErr);
     }
 
-    // ── Anthropic API ──
+    // ── Anthropic (Claude) API ──
     async function callAnthropic(prompt, apiKey, model) {
-        const m = model || 'claude-3-haiku-20240307';
-        const res = await fetch('https://api.anthropic.com/v1/messages', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'x-api-key': apiKey,
-                'anthropic-version': '2023-06-01',
-                'anthropic-dangerous-direct-browser-access': 'true'
-            },
-            body: JSON.stringify({
-                model: m,
-                max_tokens: 400,
-                messages: [{ role: 'user', content: prompt }]
-            })
-        });
-        const data = await res.json();
-        if (data.error) throw new Error(data.error.message || 'Anthropic Error');
-        const text = data.content?.[0]?.text;
-        if (!text) throw new Error('Anthropic থেকে কোনো উত্তর পাওয়া যায়নি।');
-        return text.trim();
+        const modelList = model
+            ? [model]
+            : ['claude-3-haiku-20240307', 'claude-3-5-haiku-20241022', 'claude-3-sonnet-20240229'];
+
+        let lastErr = '';
+        for (const m of modelList) {
+            try {
+                const res = await fetch('https://api.anthropic.com/v1/messages', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'x-api-key': apiKey,
+                        'anthropic-version': '2023-06-01',
+                        'anthropic-dangerous-direct-browser-access': 'true'
+                    },
+                    body: JSON.stringify({
+                        model: m,
+                        max_tokens: 500,
+                        messages: [{ role: 'user', content: prompt }]
+                    })
+                });
+                const data = await res.json();
+                if (data.error) {
+                    lastErr = data.error.message || 'Anthropic Error';
+                    if (data.error.type === 'not_found_error') continue;
+                    throw new Error(lastErr);
+                }
+                const text = data.content?.[0]?.text;
+                if (text) return text.trim();
+            } catch(e) {
+                if (e.message && e.message.includes('not_found')) { lastErr = e.message; continue; }
+                throw e;
+            }
+        }
+        throw new Error('Anthropic: ' + lastErr);
     }
 
     // ── Universal AI caller ──
