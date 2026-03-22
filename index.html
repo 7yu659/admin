@@ -2654,10 +2654,11 @@ document.addEventListener('DOMContentLoaded', async () => {
                     <div class="form-group">
                         <label>AI Provider বেছে নিন</label>
                         <select id="aiProviderSelect" style="width:100%;padding:10px;border-radius:8px;border:1px solid var(--border-color);background:var(--background-color);color:var(--text-color);font-family:'Hind Siliguri',sans-serif;">
+                            <option value="groq">Groq (Free + Fast)</option>
                             <option value="gemini">Google Gemini</option>
                             <option value="openai">OpenAI (ChatGPT)</option>
                             <option value="anthropic">Anthropic (Claude)</option>
-                            <option value="huggingface">HuggingFace (Free)</option>
+                            <option value="huggingface">HuggingFace</option>
                         </select>
                     </div>
 
@@ -2671,6 +2672,12 @@ document.addEventListener('DOMContentLoaded', async () => {
                         <label>Model (ঐচ্ছিক)</label>
                         <input type="text" id="aiModelInput" placeholder="default model ব্যবহার হবে" autocomplete="off">
                         <small id="modelHint" style="color:var(--light-text);margin-top:5px;display:block;"></small>
+                    </div>
+
+                    <div class="form-group">
+                        <label><i class="fas fa-scroll" style="color:var(--primary-color);margin-right:6px;"></i> System Prompt <small style="color:var(--light-text);">(AI-এর নির্দেশনা — খালি রাখলে default)</small></label>
+                        <textarea id="aiSystemPrompt" rows="7" style="width:100%;padding:12px;border-radius:8px;border:1px solid var(--border-color);background:var(--background-color);color:var(--text-color);font-family:'Hind Siliguri',sans-serif;resize:vertical;line-height:1.7;font-size:0.95rem;" placeholder="উদাহরণ: তুমি একজন বাংলা ভাষার সহায়ক। সবসময় বাংলায় উত্তর দাও এবং সংক্ষিপ্ত রাখো।"></textarea>
+                        <small style="color:var(--light-text);margin-top:5px;display:block;">💡 এখানে লেখা prompt AI-এর সব reply-এ apply হবে। আপনার প্রতিষ্ঠান বা প্যানেল সম্পর্কে তথ্য দিতে পারেন।</small>
                     </div>
 
                     <button type="submit" class="btn-submit"><i class="fas fa-save"></i> সেভ করুন</button>
@@ -2699,6 +2706,12 @@ document.addEventListener('DOMContentLoaded', async () => {
             </div>`;
 
         const providerInfo = {
+            groq: {
+                hint: '<a href="https://console.groq.com/keys" target="_blank" style="color:var(--primary-color);">console.groq.com/keys</a> — FREE, সব domain-এ কাজ করে',
+                models: 'llama-3.1-8b-instant, llama3-8b-8192, mixtral-8x7b-32768, gemma2-9b-it',
+                defaultModel: 'llama-3.1-8b-instant',
+                placeholder: 'gsk_...'
+            },
             gemini: {
                 hint: '<a href="https://aistudio.google.com/app/apikey" target="_blank" style="color:var(--primary-color);">aistudio.google.com/app/apikey</a> — FREE API Key',
                 models: 'gemini-2.0-flash (latest), gemini-1.5-flash, gemini-1.5-pro',
@@ -2747,9 +2760,11 @@ document.addEventListener('DOMContentLoaded', async () => {
                 if (d.provider) document.getElementById('aiProviderSelect').value = d.provider;
                 if (d.apiKey)   document.getElementById('aiApiKeyInput').value   = d.apiKey;
                 if (d.model)    document.getElementById('aiModelInput').value    = d.model;
-                _aiProvider = d.provider || 'gemini';
+                if (d.systemPrompt) document.getElementById('aiSystemPrompt').value = d.systemPrompt;
+                _aiProvider = d.provider || 'groq';
                 _aiApiKey   = d.apiKey   || '';
                 _aiModel    = d.model    || '';
+                _aiSystemPrompt = d.systemPrompt || '';
             }
         } catch(e) {}
         updateProviderUI();
@@ -2759,22 +2774,37 @@ document.addEventListener('DOMContentLoaded', async () => {
             const provider = document.getElementById('aiProviderSelect').value;
             const key      = document.getElementById('aiApiKeyInput').value.trim();
             const model    = document.getElementById('aiModelInput').value.trim();
+            const sysPr    = document.getElementById('aiSystemPrompt').value.trim();
             if (!key) { showModal({type:'danger', title:'ত্রুটি', message:'API Key দিন।'}); return; }
             try {
                 await db.collection('_configs').doc('aiSettings').set({
-                    provider, apiKey: key, model,
+                    provider, apiKey: key, model, systemPrompt: sysPr,
                     updatedAt: firebase.firestore.FieldValue.serverTimestamp()
                 });
                 _aiProvider = provider;
                 _aiApiKey   = key;
                 _aiModel    = model;
+                _aiSystemPrompt = sysPr;
 
-                // file:// protocol CORS warning
+                const providerNames = {groq:'Groq (Free)', gemini:'Google Gemini', openai:'OpenAI', anthropic:'Anthropic Claude'};
+                const pName = providerNames[provider] || provider;
+                const modelName = model || {groq:'llama-3.1-8b-instant',gemini:'gemini-2.0-flash',openai:'gpt-4o-mini',anthropic:'claude-3-haiku-20240307'}[provider] || 'Default';
                 const isFile = window.location.protocol === 'file:';
-                const msg = provider + ' API Key সেভ হয়েছে!'
-                    + (isFile ? '\n\n⚠️ সতর্কতা: file:// দিয়ে open করলে Gemini/OpenAI-এর CORS block হতে পারে।'
-                              + ' ফাইলটি web server থেকে open করুন (VS Code Live Server বা local server)।' : '');
-                showModal({type:'success', title:'সফল', message: msg});
+
+                const noteLines = [
+                    '✅ <strong>Provider:</strong> ' + pName,
+                    '🤖 <strong>Model:</strong> ' + modelName,
+                    sysPr ? '📝 <strong>System Prompt:</strong> সেভ হয়েছে (' + sysPr.length + ' অক্ষর)' : '📝 <strong>System Prompt:</strong> Default ব্যবহার হবে',
+                    isFile ? '<br>⚠️ <strong>সতর্কতা:</strong> file:// থেকে open করলে কিছু API কাজ নাও করতে পারে।' : '🌐 <strong>Status:</strong> সব ঠিক আছে, AI ready!'
+                ].join('<br>');
+
+                const modalBody = document.getElementById('modalBody');
+                const modalHeader = document.getElementById('modalHeader');
+                const modalFooter = document.getElementById('modalFooter');
+                modalHeader.innerHTML = '<div class="icon"><i class="fas fa-check-circle success"></i></div><h3>AI Settings সেভ হয়েছে!</h3>';
+                modalBody.innerHTML = '<div style="text-align:left;background:var(--light-bg);padding:15px;border-radius:10px;line-height:2;font-size:0.95rem;">' + noteLines + '</div>';
+                modalFooter.innerHTML = '<button class="btn-primary" id="_aiSaveOkBtn">বুঝেছি ✓</button>';
+                document.getElementById('customModal').classList.add('active');
             } catch(err) {
                 showModal({type:'danger', title:'ত্রুটি', message:'সেভ করা যায়নি।'});
             }
@@ -3676,11 +3706,161 @@ document.addEventListener('DOMContentLoaded', async () => {
 
         // Real-time listener — একটাই chatId দিয়ে সহজ query
         if (chatUnsubscribe) chatUnsubscribe();
+        let _subInitDone = false;
+        const _streamedIds = new Set();
+
+        // সময় format করো
+        function _fmtTime(ts) {
+            const d = ts && ts.toDate ? ts.toDate() : new Date();
+            return d.toLocaleTimeString('en-US', {hour:'2-digit', minute:'2-digit', hour12:true});
+        }
+
+        // Sent bubble তৈরি করো (নিজের message)
+        function _appendSentBubble(container, text, imgUrl, time) {
+            const div = document.createElement('div');
+            div.className = 'msg-bubble sent';
+            if (imgUrl) {
+                div.innerHTML = (text ? `<div>${text}</div>` : '')
+                    + `<img src="${imgUrl}" style="max-width:100%;border-radius:10px;margin-top:5px;cursor:pointer;" onclick="showImagePreview('${imgUrl}','image')">`;
+            } else {
+                div.appendChild(document.createTextNode(text));
+            }
+            div.insertAdjacentHTML('beforeend', `<span class="msg-inline-meta"><i class="fas fa-check-double" style="font-size:0.6rem;"></i>${time}</span>`);
+            container.appendChild(div);
+            container.scrollTop = container.scrollHeight;
+        }
+
+        // Received bubble — streaming effect সহ
+        async function _appendReceivedStreaming(container, text, imgUrl, time) {
+            // Thinking indicator — কমপক্ষে ৩ সেকেন্ড দেখাবে
+            const thinkEl = document.getElementById('_thinkingIndicator');
+            if (thinkEl) {
+                const shownAt = parseInt(thinkEl.dataset.shownAt || '0');
+                const elapsed = Date.now() - shownAt;
+                const minShow = 3000; // ৩ সেকেন্ড minimum
+                if (elapsed < minShow) {
+                    await new Promise(r => setTimeout(r, minShow - elapsed));
+                }
+                // dots সরাও
+                const el = document.getElementById('_thinkingIndicator');
+                if (el) el.remove();
+            } else {
+                // dots এখনো দেখা যায়নি (১-২s delay এ আছে) — ৩ সেকেন্ড wait
+                await new Promise(r => setTimeout(r, 3000));
+                const el2 = document.getElementById('_thinkingIndicator');
+                if (el2) el2.remove();
+            }
+
+            if (imgUrl) {
+                // ছবি হলে সরাসরি দেখাও
+                const div = document.createElement('div');
+                div.className = 'msg-bubble received';
+                div.innerHTML = (text ? `<div>${text}</div>` : '')
+                    + `<img src="${imgUrl}" style="max-width:100%;border-radius:10px;margin-top:5px;cursor:pointer;" onclick="showImagePreview('${imgUrl}','image')">`;
+                div.insertAdjacentHTML('beforeend', `<span class="msg-inline-meta">${time}</span>`);
+                container.appendChild(div);
+                container.scrollTop = container.scrollHeight;
+                return;
+            }
+
+            // Text — streaming দেখাও
+            const bubble = document.createElement('div');
+            bubble.className = 'msg-bubble received';
+            const cursor = document.createElement('span');
+            cursor.className = 'streaming-cursor';
+            bubble.appendChild(cursor);
+            container.appendChild(bubble);
+            container.scrollTop = container.scrollHeight;
+
+            const chars = [...text];
+            const totalLen = chars.length;
+            const totalDuration = Math.min(Math.max(totalLen * 35, 2000), 7000);
+            const baseD = totalDuration / totalLen;
+
+            await new Promise(resolve => {
+                let i = 0;
+                function typeNext() {
+                    if (i >= chars.length) {
+                        cursor.remove();
+                        bubble.insertAdjacentHTML('beforeend',
+                            '<span class="msg-inline-meta"><i class="fas fa-check" style="font-size:0.6rem;opacity:0.7;"></i>' + time + '</span>');
+                        resolve();
+                        return;
+                    }
+                    const ch = chars[i++];
+                    bubble.insertBefore(document.createTextNode(ch), cursor);
+                    container.scrollTop = container.scrollHeight;
+                    const d = ch==='।'||ch==='?'||ch==='!' ? baseD*4
+                            : ch==='.'                     ? baseD*3
+                            : ch===','||ch===';'           ? baseD*1.5
+                            : ch==='\n'                   ? baseD*2
+                            : baseD + (Math.random()*6-3);
+                    setTimeout(typeNext, Math.max(d, 15));
+                }
+                typeNext();
+            });
+        }
+
         chatUnsubscribe = db.collection('messages')
             .where('chatId', '==', CHAT_ID)
             .orderBy('time', 'asc')
-            .onSnapshot(snap => {
-                renderMessages(snap, chatBody, currentUser);
+            .onSnapshot(async snap => {
+
+                // docChanges দিয়ে সব 'added' type নাও
+                const changes = snap.docChanges();
+
+                if (!_subInitDone) {
+                    // প্রথম load — সব পুরনো messages manually append করো
+                    // renderMessages ব্যবহার করব না কারণ সেটা innerHTML clear করে
+                    chatBody.innerHTML = '';
+                    const docs = snap.docs.slice().sort((a,b) => {
+                        const ta = a.data().time ? a.data().time.toMillis() : 0;
+                        const tb = b.data().time ? b.data().time.toMillis() : 0;
+                        return ta - tb;
+                    });
+                    for (const doc of docs) {
+                        _streamedIds.add(doc.id);
+                        const m = doc.data();
+                        const t = _fmtTime(m.time);
+                        if (m.from === currentUser) {
+                            _appendSentBubble(chatBody, m.text||'', m.imageUrl||'', t);
+                        } else {
+                            // পুরনো message — streaming ছাড়া সরাসরি দেখাও
+                            const div = document.createElement('div');
+                            div.className = 'msg-bubble received';
+                            if (m.imageUrl) {
+                                div.innerHTML = (m.text?`<div>${m.text}</div>`:'')
+                                    + `<img src="${m.imageUrl}" style="max-width:100%;border-radius:10px;margin-top:5px;cursor:pointer;" onclick="showImagePreview('${m.imageUrl}','image')">`;
+                            } else {
+                                div.appendChild(document.createTextNode(m.text||''));
+                            }
+                            div.insertAdjacentHTML('beforeend',
+                                `<span class="msg-inline-meta">${t}</span>`);
+                            chatBody.appendChild(div);
+                        }
+                    }
+                    chatBody.scrollTop = chatBody.scrollHeight;
+                    _subInitDone = true;
+                    if (chatModal.classList.contains('active')) markMessagesAsRead(CHAT_ID, currentUser);
+                    return;
+                }
+
+                // নতুন added messages — streaming সহ
+                for (const change of changes) {
+                    if (change.type !== 'added') continue;
+                    const docId = change.doc.id;
+                    if (_streamedIds.has(docId)) continue;
+                    _streamedIds.add(docId);
+
+                    const nm = change.doc.data();
+                    const t = _fmtTime(nm.time);
+
+                    if (nm.from === currentUser) {
+                        _appendSentBubble(chatBody, nm.text||'', nm.imageUrl||'', t);
+                    } else {
+                        await _appendReceivedStreaming(chatBody, nm.text||'', nm.imageUrl||'', t);
+                    }
+                }
                 if (chatModal.classList.contains('active')) markMessagesAsRead(CHAT_ID, currentUser);
             }, err => {
                 // Index না থাকলে fallback query
@@ -3746,9 +3926,37 @@ document.addEventListener('DOMContentLoaded', async () => {
                 type: 'image'
             });
         } else {
+            // ১. Firestore এ save করো
             await db.collection('messages').add({
                 ...msgBase, text, type: 'text'
             });
+
+            // ২. Sub-admin হলে ১-২ সেকেন্ড পরে ● ● ● দেখাও
+            const _chatBody = document.getElementById('chatBody');
+            if (_chatBody && from !== 'Ebrahim') {
+                // ১-২ সেকেন্ড delay তারপর dots
+                const showDelay = 1000 + Math.random() * 1000;
+                setTimeout(() => {
+                    // আগেরটা থাকলে সরাও
+                    const oldInd = document.getElementById('_thinkingIndicator');
+                    if (oldInd) oldInd.remove();
+
+                    const thinkEl = document.createElement('div');
+                    thinkEl.id = '_thinkingIndicator';
+                    thinkEl.dataset.shownAt = Date.now().toString();
+                    thinkEl.className = 'msg-bubble received';
+                    thinkEl.style.cssText = 'align-self:flex-start;padding:14px 18px;display:flex;gap:7px;align-items:center;min-width:64px;';
+                    thinkEl.innerHTML = '<div class="typing-dot"></div><div class="typing-dot"></div><div class="typing-dot"></div>';
+                    _chatBody.appendChild(thinkEl);
+                    _chatBody.scrollTop = _chatBody.scrollHeight;
+
+                    // ৩০ সেকেন্ড fallback
+                    setTimeout(() => {
+                        const el = document.getElementById('_thinkingIndicator');
+                        if (el) el.remove();
+                    }, 30000);
+                }, showDelay);
+            }
         }
     }
 
@@ -4168,7 +4376,24 @@ document.addEventListener('DOMContentLoaded', async () => {
         };
 
         // ── AI System ──
-        let autoReplyMode = false;
+        let autoReplyMode = true; // default ON
+
+        // Firestore থেকে auto-reply state load করো
+        db.collection('_configs').doc('aiSettings').get().then(doc => {
+            if (doc.exists && doc.data().autoReplyEnabled !== undefined) {
+                autoReplyMode = doc.data().autoReplyEnabled;
+            }
+            // Button UI update
+            const btn = document.getElementById('aiBtnAutoToggle');
+            if (btn) {
+                btn.innerHTML = autoReplyMode
+                    ? '<i class="fas fa-bolt"></i> Auto-Reply ON'
+                    : '<i class="fas fa-bolt"></i> Auto-Reply OFF';
+                btn.style.background = autoReplyMode ? 'linear-gradient(135deg,#16a34a,#15803d)' : '';
+                btn.style.color = autoReplyMode ? 'white' : '';
+                btn.style.borderColor = autoReplyMode ? 'transparent' : '';
+            }
+        }).catch(() => {});
 
         function getConversationHistory(snap) {
             const docs = snap ? snap.docs.slice().sort((a,b) => {
@@ -4203,10 +4428,11 @@ document.addEventListener('DOMContentLoaded', async () => {
                 const history = snap ? getConversationHistory(snap) : '';
                 const lastMsg = (snap && snap.docs.length) ? (snap.docs[snap.docs.length-1].data().text || '[image]') : '';
 
-                const prompt = 'You are a helpful admin assistant. '
-                    + 'Conversation so far:\n' + history
-                    + '\n\nLast message from sub-admin: "' + lastMsg + '"'
-                    + '\n\nWrite a short, helpful reply. Detect the language and reply in the SAME language. Return ONLY the reply text.';
+                const isBnSug = /[ঀ-৿]/.test(lastMsg + history);
+                const _CTX = 'তুমি একটি বাংলা অ্যাডমিন প্যানেলের AI সহকারী। এই প্যানেল দিয়ে শিক্ষা প্রতিষ্ঠানের শিক্ষার্থীদের তথ্য ব্যবস্থাপনা করা হয়। Features: Dashboard, Users, Add User, Form Settings, Create Admin, Cloudinary, AI Settings, Messages, শিক্ষার্থী এডিট/প্রিন্ট/ডাউনলোড।';
+                const prompt = isBnSug
+                    ? _CTX + '\n\nকথোপকথন:\n' + history + '\n\nপ্রশ্ন: ' + lastMsg + '\n\nবাংলায় সংক্ষিপ্ত উত্তর:'
+                    : 'You are an admin panel assistant.\n\nConversation:\n' + history + '\n\nQuestion: ' + lastMsg + '\n\nBrief answer:';
 
                 const suggestion = await callClaudeAI('', prompt);
 
@@ -4263,9 +4489,12 @@ document.addEventListener('DOMContentLoaded', async () => {
             const history = getConversationHistory(snap);
             if (!history) { aiBtnSummary.disabled = false; aiBtnSummary.innerHTML = '<i class="fas fa-align-left"></i> Summary'; return; }
 
-            const system = 'You are a summarizer AI. Detect the language of the conversation and write a 2-3 line summary in that SAME language.';
+            const isBnSum = /[ঀ-৿]/.test(history);
+            const sumPrompt = isBnSum
+                ? 'নিচের কথোপকথনটি একটি অ্যাডমিন প্যানেল সম্পর্কে। ২-৩ লাইনে বাংলায় সারসংক্ষেপ লেখো। শুধু সারসংক্ষেপ।\n\nকথোপকথন:\n' + history + '\n\nসারসংক্ষেপ:'
+                : 'Summarize this admin panel support conversation in 2-3 lines.\n\nConversation:\n' + history + '\n\nSummary:';
             try {
-                const summary = await callClaudeAI(system, 'Conversation:\n' + history + '\n\nসারসংক্ষেপ দাও।');
+                const summary = await callClaudeAI('', sumPrompt);
                 const box = document.createElement('div');
                 box.className = 'ai-summary-box'; box.id = 'aiSummaryBox';
                 box.innerHTML = '<strong><i class="fas fa-robot" style="color:var(--primary-color);margin-right:5px;"></i>AI Summary:</strong><br>' + sanitize(summary)
@@ -4273,14 +4502,14 @@ document.addEventListener('DOMContentLoaded', async () => {
                 const chatBody2 = document.getElementById('adminChatBody');
                 chatBody2.parentNode.insertBefore(box, chatBody2);
                 document.getElementById('aiSummaryCloseBtn').onclick = () => box.remove();
-            } catch(e) {}
+            } catch(e) { showModal({type:'danger',title:'Summary ত্রুটি',message:e.message||'হয়নি।'}); }
             aiBtnSummary.disabled = false;
             aiBtnSummary.innerHTML = '<i class="fas fa-align-left"></i> Summary';
         };
 
-        // Auto-Reply Toggle
+        // Auto-Reply Toggle — Firestore-এ save করো
         const aiBtnAutoToggle = document.getElementById('aiBtnAutoToggle');
-        if (aiBtnAutoToggle) aiBtnAutoToggle.onclick = () => {
+        if (aiBtnAutoToggle) aiBtnAutoToggle.onclick = async () => {
             autoReplyMode = !autoReplyMode;
             aiBtnAutoToggle.innerHTML = autoReplyMode
                 ? '<i class="fas fa-bolt"></i> Auto-Reply ON'
@@ -4290,9 +4519,92 @@ document.addEventListener('DOMContentLoaded', async () => {
                 : '';
             aiBtnAutoToggle.style.color = autoReplyMode ? 'white' : '';
             aiBtnAutoToggle.style.borderColor = autoReplyMode ? 'transparent' : '';
+            // Firestore-এ save করো
+            try {
+                await db.collection('_configs').doc('aiSettings').set(
+                    { autoReplyEnabled: autoReplyMode },
+                    { merge: true }
+                );
+            } catch(e) { console.error('Auto-reply save:', e); }
         };
 
         // Realtime — একটাই chatId
+        // Auto-reply: local Set দিয়ে track
+        let _arDone = false;
+        const _arSet = new Set();
+
+        const _ADMIN_CTX = 'তুমি একটি বাংলা অ্যাডমিন প্যানেলের AI সহকারী। এই প্যানেল দিয়ে শিক্ষা প্রতিষ্ঠানের শিক্ষার্থীদের তথ্য সংগ্রহ ও ব্যবস্থাপনা করা হয়।\n\nপ্যানেলের features:\n- Dashboard: সব প্রতিষ্ঠান ও শিক্ষার্থীর সংখ্যা\n- Users: ব্যবহারকারীদের তালিকা\n- Add User: মোবাইল নম্বর দিয়ে নতুন ব্যবহারকারী যোগ\n- Form Settings: প্রতিষ্ঠানের form কাস্টমাইজ\n- Create Admin: সাব-অ্যাডমিন তৈরি\n- Cloudinary Settings: ছবি আপলোড সেটআপ\n- AI Settings: AI provider সেটআপ (Groq/Gemini/OpenAI)\n- Messages: সাব-অ্যাডমিনদের সাথে চ্যাট\n- প্রতিষ্ঠান: শিক্ষার্থী এডিট, ডিলিট, প্রিন্ট, ডাউনলোড (CSV/Excel/PDF)\n\nসাব-অ্যাডমিন নির্দিষ্ট ব্যবহারকারীদের দেখাশোনা করে।\nব্যবহারকারীরা মোবাইল নম্বর দিয়ে লগইন করে।\n\nপ্রশ্ন অনুযায়ী বাংলায় সংক্ষিপ্ত ও সহায়ক উত্তর দাও। শুধু উত্তর লেখো।';
+
+        // Streaming text effect
+        async function streamTextInBubble(text, container) {
+            const bubble = document.createElement('div');
+            bubble.className = 'streaming-bubble';
+            const cursor = document.createElement('span');
+            cursor.className = 'streaming-cursor';
+            bubble.appendChild(cursor);
+            container.appendChild(bubble);
+            container.scrollTop = container.scrollHeight;
+
+            const chars = [...text]; // Unicode-safe split
+            const avgDelay = Math.max(15, Math.min(40, 2000 / chars.length));
+
+            for (let i = 0; i < chars.length; i++) {
+                bubble.insertBefore(document.createTextNode(chars[i]), cursor);
+                container.scrollTop = container.scrollHeight;
+                // স্বাভাবিক typing rhythm
+                const d = chars[i] === '\n' ? avgDelay * 3
+                        : chars[i] === '।' || chars[i] === '.' ? avgDelay * 4
+                        : chars[i] === ',' ? avgDelay * 2
+                        : avgDelay + (Math.random() * 10 - 5);
+                await new Promise(r => setTimeout(r, d));
+            }
+            cursor.remove();
+            return bubble;
+        }
+
+        async function _doAR(doc) {
+            if (!autoReplyMode) return;
+            const m = doc.data(), id = doc.id;
+            if (m.from === adminId || m.aiGenerated || _arSet.has(id)) return;
+            const txt = m.text || '';
+            if (!txt) return;
+            _arSet.add(id);
+
+            // টাইপিং animation দেখাও
+            const typingEl = document.createElement('div');
+            typingEl.className = 'typing-bubble';
+            typingEl.id = 'typingIndicator';
+            typingEl.innerHTML = '<div class="typing-dot"></div><div class="typing-dot"></div><div class="typing-dot"></div>';
+            body.appendChild(typingEl);
+            body.scrollTop = body.scrollHeight;
+
+            // Realistic typing delay (message length অনুযায়ী)
+            const thinkDelay = 800 + Math.random() * 600;
+            await new Promise(r => setTimeout(r, thinkDelay));
+
+            const isBn = /[ঀ-৿]/.test(txt);
+            const sysCtx = _aiSystemPrompt || _ADMIN_CTX;
+            const p = isBn
+                ? sysCtx + '\n\nপ্রশ্ন: ' + txt + '\n\nবাংলায় সংক্ষিপ্ত উত্তর:'
+                : (sysCtx || 'You are a helpful admin panel assistant.') + '\n\nQuestion: ' + txt + '\n\nBrief answer:';
+            try {
+                const r = await callClaudeAI('', p);
+                typingEl.remove();
+                if (r && r.trim()) {
+                    // সরাসরি Firestore-এ save করো
+                    // Sub-admin side-এ streaming দেখাবে
+                    await db.collection('messages').add({
+                        from: adminId, to: subAdmin.username, chatId: CHAT_ID,
+                        text: r.trim(), time: firebase.firestore.FieldValue.serverTimestamp(),
+                        read: false, type: 'text', aiGenerated: true
+                    });
+                }
+            } catch(e) {
+                typingEl.remove();
+                console.error('AR:', e.message);
+            }
+        }
+
         if (chatUnsubscribe) chatUnsubscribe();
         chatUnsubscribe = db.collection('messages')
             .where('chatId', '==', CHAT_ID)
@@ -4300,54 +4612,36 @@ document.addEventListener('DOMContentLoaded', async () => {
             .onSnapshot(async (snap) => {
                 renderMessages(snap, body, adminId);
                 markMessagesAsRead(CHAT_ID, adminId);
-
-                // Auto-reply: শেষ message sub-admin এর হলে AI reply দাও
-                if (autoReplyMode && snap.docs.length > 0) {
-                    const lastDoc = snap.docs[snap.docs.length - 1];
-                    const last = lastDoc.data();
-                    if (last.from !== adminId && !last._autoReplied) {
-                        lastDoc.ref.update({ _autoReplied: true }).catch(() => {});
-                        const history = getConversationHistory(snap);
-                        const lastText = last.text || '[image]';
-                        const prompt = 'You are a helpful admin assistant. Reply to this message in the SAME language it was written in. Be brief and friendly. Return ONLY the reply text.\n\nMessage: "' + lastText + '"\n\nContext:\n' + history;
-                        try {
-                            const reply = await callClaudeAI('', prompt);
-                            if (reply) {
-                                await db.collection('messages').add({
-                                    from: adminId, to: subAdmin.username, chatId: CHAT_ID,
-                                    text: reply,
-                                    time: firebase.firestore.FieldValue.serverTimestamp(),
-                                    read: false, type: 'text', aiGenerated: true
-                                });
-                            }
-                        } catch(e) { console.error('Auto-reply error:', e); }
-                    }
+                if (!_arDone) { snap.docs.forEach(d => _arSet.add(d.id)); _arDone = true; return; }
+                for (const ch of snap.docChanges()) {
+                    if (ch.type === 'added') await _doAR(ch.doc);
                 }
             }, err => {
-                console.warn('Admin ordered query failed, using fallback:', err);
                 if (chatUnsubscribe) chatUnsubscribe();
+                _arDone = false;
                 chatUnsubscribe = db.collection('messages')
                     .where('chatId', '==', CHAT_ID)
-                    .onSnapshot(snap => {
+                    .onSnapshot(async (snap) => {
                         renderMessages(snap, body, adminId);
                         markMessagesAsRead(CHAT_ID, adminId);
+                        if (!_arDone) { snap.docs.forEach(d => _arSet.add(d.id)); _arDone = true; return; }
+                        for (const ch of snap.docChanges()) { if (ch.type === 'added') await _doAR(ch.doc); }
                     });
             });
     }
 
     // ══ GLOBAL AI FUNCTIONS — Multi-Provider ══
     let _aiApiKey  = '';
-    let _aiProvider = 'gemini';
+    let _aiProvider = 'groq';
     let _aiModel   = '';
 
     async function loadAIConfig() {
-        if (_aiApiKey) return;
         try {
             const doc = await db.collection('_configs').doc('aiSettings').get();
             if (doc.exists) {
                 const d = doc.data();
                 _aiApiKey   = d.apiKey   || '';
-                _aiProvider = d.provider || 'gemini';
+                _aiProvider = d.provider || 'groq';
                 _aiModel    = d.model    || '';
             }
         } catch(e) { console.warn('AI config load failed:', e); }
@@ -4475,22 +4769,16 @@ document.addEventListener('DOMContentLoaded', async () => {
         throw new Error('Anthropic: ' + lastErr);
     }
 
-    // ── HuggingFace Inference API ──
-    async function callHuggingFace(prompt, apiKey, model) {
+    // ── Groq API (FREE + CORS-friendly) ──
+    async function callGroq(prompt, apiKey, model) {
         const modelList = model
             ? [model]
-            : [
-                'mistralai/Mistral-7B-Instruct-v0.3',
-                'HuggingFaceH4/zephyr-7b-beta',
-                'microsoft/DialoGPT-large',
-                'facebook/blenderbot-400M-distill'
-              ];
+            : ['llama-3.1-8b-instant', 'llama3-8b-8192', 'mixtral-8x7b-32768', 'gemma2-9b-it'];
 
         let lastErr = '';
         for (const m of modelList) {
             try {
-                const url = 'https://api-inference.huggingface.co/models/' + m + '/v1/chat/completions';
-                const res = await fetch(url, {
+                const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
@@ -4500,43 +4788,103 @@ document.addEventListener('DOMContentLoaded', async () => {
                         model: m,
                         messages: [{ role: 'user', content: prompt }],
                         max_tokens: 400,
-                        temperature: 0.7,
-                        stream: false
+                        temperature: 0.7
                     })
                 });
                 const data = await res.json();
-
-                // OpenAI-compatible response
-                if (data.choices && data.choices[0] && data.choices[0].message) {
-                    return data.choices[0].message.content.trim();
-                }
-                // Legacy HF format
-                if (Array.isArray(data) && data[0] && data[0].generated_text) {
-                    const full = data[0].generated_text;
-                    // prompt বাদ দিয়ে শুধু generated part নাও
-                    const reply = full.includes(prompt) ? full.slice(full.lastIndexOf(prompt) + prompt.length).trim() : full.trim();
-                    if (reply) return reply;
-                }
                 if (data.error) {
-                    lastErr = data.error;
-                    // Model loading হচ্ছে — retry
-                    if (typeof data.error === 'string' && data.error.includes('loading')) {
-                        await new Promise(r => setTimeout(r, 8000));
-                        // একবার retry
+                    lastErr = data.error.message || 'Groq Error';
+                    if (data.error.code === 'model_not_active' || lastErr.includes('not found')) continue;
+                    throw new Error(lastErr);
+                }
+                const text = data.choices?.[0]?.message?.content;
+                if (text) return text.trim();
+                lastErr = 'Empty response';
+            } catch(e) {
+                if (e.message && (e.message.includes('not found') || e.message.includes('not_active'))) {
+                    lastErr = e.message; continue;
+                }
+                throw e;
+            }
+        }
+        throw new Error('Groq Error: ' + lastErr);
+    }
+
+    // ── HuggingFace Inference API ──
+    async function callHuggingFace(prompt, apiKey, model) {
+        // HuggingFace Serverless Inference — CORS-friendly endpoints
+        const modelList = model
+            ? [model]
+            : [
+                'mistralai/Mistral-7B-Instruct-v0.3',
+                'HuggingFaceH4/zephyr-7b-beta',
+                'mistralai/Mistral-7B-Instruct-v0.1'
+              ];
+
+        let lastErr = '';
+        for (const m of modelList) {
+            try {
+                // Correct HF Inference API endpoint
+                const url = 'https://api-inference.huggingface.co/models/' + m;
+                const res = await fetch(url, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': 'Bearer ' + apiKey,
+                        'x-wait-for-model': 'true'
+                    },
+                    body: JSON.stringify({
+                        inputs: prompt,
+                        parameters: {
+                            max_new_tokens: 300,
+                            temperature: 0.7,
+                            return_full_text: false,
+                            do_sample: true
+                        }
+                    })
+                });
+
+                if (!res.ok) {
+                    const errText = await res.text().catch(() => res.status);
+                    lastErr = 'HTTP ' + res.status + ': ' + errText;
+                    if (res.status === 503) {
+                        // Model loading — wait and retry
+                        await new Promise(r => setTimeout(r, 10000));
                         const res2 = await fetch(url, {
                             method: 'POST',
-                            headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + apiKey },
-                            body: JSON.stringify({ model: m, messages: [{ role: 'user', content: prompt }], max_tokens: 400, stream: false })
+                            headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + apiKey, 'x-wait-for-model': 'true' },
+                            body: JSON.stringify({ inputs: prompt, parameters: { max_new_tokens: 300, return_full_text: false, do_sample: true } })
                         });
-                        const data2 = await res2.json();
-                        if (data2.choices?.[0]?.message?.content) return data2.choices[0].message.content.trim();
+                        if (res2.ok) {
+                            const d2 = await res2.json();
+                            const t2 = Array.isArray(d2) ? d2[0]?.generated_text : d2?.generated_text;
+                            if (t2) return t2.trim();
+                        }
                     }
                     continue;
                 }
-                lastErr = 'Empty response from ' + m;
-            } catch(e) { lastErr = e.message; }
+
+                const data = await res.json();
+
+                // Array format: [{generated_text: "..."}]
+                if (Array.isArray(data) && data[0]?.generated_text) {
+                    return data[0].generated_text.trim();
+                }
+                // Object format
+                if (data.generated_text) return data.generated_text.trim();
+                // Conversational format
+                if (data.generated_text !== undefined) return String(data.generated_text).trim();
+
+                lastErr = 'Unexpected response format';
+            } catch(e) {
+                lastErr = e.message;
+                if (e.message && e.message.includes('fetch')) {
+                    // CORS issue — try next model or fail with helpful message
+                    continue;
+                }
+            }
         }
-        throw new Error('HuggingFace Error: ' + lastErr + '\n\n💡 huggingface.co/settings/tokens থেকে নতুন token নিন।');
+        throw new Error('HuggingFace কাজ করছে না।\n\nকারণ: GitHub Pages থেকে HuggingFace API block হতে পারে।\n\n💡 সমাধান: AI Settings-এ Gemini provider ব্যবহার করুন — নতুন API key নিন: aistudio.google.com/app/apikey');
     }
 
     // ── Universal AI caller ──
@@ -4545,9 +4893,12 @@ document.addEventListener('DOMContentLoaded', async () => {
         const apiKey = _aiApiKey;
         if (!apiKey) throw new Error('API Key নেই। Sidebar > AI Settings থেকে যোগ করুন।');
 
-        const fullPrompt = (systemPrompt ? systemPrompt + '\n\n' : '') + userMsg;
+        // Custom system prompt override করে default-কে
+        const effectiveSys = _aiSystemPrompt || systemPrompt || '';
+        const fullPrompt = (effectiveSys ? systemPrompt + '\n\n' : '') + userMsg;
 
         switch (_aiProvider) {
+            case 'groq':         return await callGroq(fullPrompt, apiKey, _aiModel);
             case 'openai':       return await callOpenAI(fullPrompt, apiKey, _aiModel);
             case 'anthropic':    return await callAnthropic(fullPrompt, apiKey, _aiModel);
             case 'huggingface':  return await callHuggingFace(fullPrompt, apiKey, _aiModel);
@@ -4569,6 +4920,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
 
     function initApp() {
+        // App শুরুতেই AI config load করো
+        loadAIConfig().catch(() => {});
         const defaultTheme = localStorage.getItem('theme') || 'dark';
         applyTheme(defaultTheme);
         const toggleIcon = menuToggleBtn.querySelector('i');
